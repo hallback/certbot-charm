@@ -17,6 +17,7 @@ from ops.model import ActiveStatus, BlockedStatus
 
 
 logger = logging.getLogger(__name__)
+validplugins = ["dns-google", "dns-rfc2136", "dns-route53"]
 
 
 class UnsupportedPluginError(Exception):
@@ -40,16 +41,24 @@ class CertbotCharm(CharmBase):
 
     def _on_install(self, _):
         """Handler for the install hook."""
-        _host.install_packages([
-            "certbot",
-            "python3-certbot-dns-google",
-            "python3-certbot-dns-rfc2136",
-            "python3-certbot-dns-route53"])
+        _host.install_snaps(["certbot", "--classic"])
         _host.symlink(os.path.join(self.charm_dir, "bin/deploy.py"),
                       "/etc/letsencrypt/renewal-hooks/deploy/certbot-charm")
 
     def _on_config_changed(self, _):
         """Handler for the config-changed hook."""
+
+        # Ensure plugin is installed. Check and throw exception if illegal
+        # plugin? Wait status if no plugin?
+        plugin = self.model.config["plugin"]
+        if not plugin:
+            logger.exception("plugin not yet configured.")
+        elif plugin not in validplugins:
+            logger.exception("plugin not a valid plugin")
+        else:
+            logger.info(f"plugin {plugin} will be used.")
+            _host.install_plugin(plugin)
+
         _host.write_config(
             self._config_path("config.ini"),
             {
@@ -165,8 +174,6 @@ class CertbotCharm(CharmBase):
             params: Plugin-specific parameters that will be converted to
               arguments or environment variables.
         """
-        propagation = params.get("propagation-seconds",
-                                 self.model.config["propagation-seconds"])
         aws_access_key_id = params.get(
             "aws-access-key-id", self.model.config["dns-route53-aws-access-key-id"])
         aws_secret_access_key = params.get(
@@ -186,9 +193,7 @@ class CertbotCharm(CharmBase):
             with open(self._aws_config_file, "w") as f:
                 config.write(f)
 
-        return [
-            "--dns-route53-propagation-seconds={}".format(propagation),
-        ]
+        return []
 
     def _get_certificate(self, plugin: str, agree_tos: bool, email: str, domains: str,
                          params: dict = {}) -> None:
@@ -284,23 +289,34 @@ class Host:
         """Wrapper for os.path.exists."""
         return os.path.exists(path)
 
-    def install_packages(self, packages: List[str]):
-        """Install apt packages.
+    def install_snaps(self, packages: List[str]):
+        """Install snaps.
 
         Args:
-            packages: List of packages to install.
+            packages: List of snaps to install.
         """
-        self.run(["apt-get", "update", "-q"])
-        cmd = ["apt-get", "install", "-q", "-y"]
+        cmd = ["snap", "install"]
         cmd.extend(packages)
         self.run(cmd)
+
+    def install_plugin(self, plugin: str):
+        plugin = f"certbot-{plugin}"
+
+        if self.run(["snap", "list", plugin]) != 0:
+            logger.info(f"installing snap {plugin}")
+            cmd = ["snap", "set", "certbot", "trust-plugin-with-root=ok"]
+            self.run(cmd)
+            self.install_snaps([plugin])
+        else:
+            logger.info(f"snap {plugin} is already installed")
 
     def run(self, *args, **kwargs):
         """Run a subcommand.
 
         This is a wrapper for subprocess.run.
         """
-        subprocess.run(*args, **kwargs)
+        p = subprocess.run(*args, **kwargs)
+        return p.returncode
 
     def symlink(self, src: str, dst: str):
         """Create, or update a symbolic link.

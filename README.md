@@ -4,6 +4,16 @@
 
 Certbot is used to acquire and manage certificates from Let's Encrypt.
 
+## About
+
+This is a fork of Canonical's
+[certbot-charm](https://github.com/canonical/certbot-charm), modified to use the
+[certbot snap](https://snapcraft.io/certbot) instead of the deb packages. This
+allows for better feature parity and access to newer versions of Certbot and its
+plugins on older versions of Ubuntu.
+
+The charm can be used on Ubuntu 20.04, 22.04 and 24.04.
+
 ## Acquiring Certificates
 
 The charm will attempt to acquire a certificate in the start hook, this
@@ -78,6 +88,10 @@ $ juju run-action --wait certbot/0 get-certificate \
     email=webmaster@example.com \
     plugin=dns-route53
 ```
+
+The plugin option `dns-route53-propagation-seconds` has been deprecated,
+therefore the charm configuration option `propagation-seconds` will be silently
+ignored when using this plugin.
 
 ## Updating Deploy Configuration
 
